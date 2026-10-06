@@ -53,7 +53,7 @@ export const WARNING_STATUSES: Record<WarningStatus, string> = {
 // Who may place (create/delete/move) each asset kind. Mirrors public.can_place().
 // Water sources are registered by barangay leaders; DRRM places filling stations.
 export const CAN_PLACE: Record<Role, AssetKind[]> = {
-  lgu: [],
+  lgu: ['pump', 'well', 'reservoir', 'station'], // the LGU can add any kind (supabase-source-images.sql)
   drrm: ['station'],
   official: ['pump', 'well', 'reservoir'],
   citizen: [],
@@ -159,8 +159,9 @@ export const getWaterState = () => state
 
 // ---------- Supabase ----------
 
-type Row = { id: string; kind: string; name: string; lng: number; lat: number; status: string; barangay_psgc: string | null; system_id: string | null }
-const SOURCE_COLUMNS = 'id, kind, name, lng, lat, status, barangay_psgc, system_id'
+type Row = { id: string; kind: string; name: string; lng: number; lat: number; status: string; barangay_psgc: string | null; system_id: string | null; locked?: boolean | null }
+const SOURCE_COLUMNS = 'id, kind, name, lng, lat, status, barangay_psgc, system_id, locked'
+const SOURCE_COLUMNS_NO_LOCK = 'id, kind, name, lng, lat, status, barangay_psgc, system_id' // before supabase-source-locked.sql
 
 const toAsset = (r: Row | null): Asset | null =>
   r && isKind(r.kind) && isNum(r.lng) && isNum(r.lat)
@@ -173,6 +174,7 @@ const toAsset = (r: Row | null): Asset | null =>
         status: isStatus(r.status) ? r.status : 'ok',
         barangayPsgc: r.barangay_psgc ?? '',
         systemId: r.system_id ?? '',
+        locked: r.locked ?? true,
       }
     : null
 
@@ -296,9 +298,16 @@ function fail(message: string) {
 
 export async function loadAssets() {
   try {
-    const { data, error } = await supabase().from('water_sources').select(SOURCE_COLUMNS).order('created_at')
-    if (error) throw new Error(error.message)
-    const assets = (data as Row[]).map(toAsset).filter((a): a is Asset => a !== null)
+    let res: { data: unknown[] | null; error: { message: string } | null } = await supabase()
+      .from('water_sources')
+      .select(SOURCE_COLUMNS)
+      .order('created_at')
+    // Database without the locked column yet: still show the sources (they stay locked).
+    if (res.error && /locked/i.test(res.error.message)) {
+      res = await supabase().from('water_sources').select(SOURCE_COLUMNS_NO_LOCK).order('created_at')
+    }
+    if (res.error) throw new Error(res.error.message)
+    const assets = ((res.data ?? []) as Row[]).map(toAsset).filter((a): a is Asset => a !== null)
     set({ ...state, assets, loading: false })
   } catch (e) {
     set({ ...state, loading: false, error: friendly((e as Error).message) })
@@ -435,6 +444,7 @@ export async function registerSource(input: {
   lng: number
   lat: number
   barangayPsgc: string
+  base64Image?: string | null // optional photo as a data URL (see lib/image.ts)
 }): Promise<string | null> {
   if (!CAN_PLACE[state.role].includes(input.kind)) return "Your role isn't allowed to add this."
   try {
@@ -444,12 +454,55 @@ export async function registerSource(input: {
       lng: input.lng,
       lat: input.lat,
       status: input.status,
-      barangay_psgc: input.barangayPsgc,
+      barangay_psgc: input.barangayPsgc || null,
+      ...(input.base64Image ? { base64_image: input.base64Image } : {}),
     })
-    if (error) return friendly(error.message)
+    if (error) return photoHint(error.message) ?? friendly(error.message)
     void loadAssets()
     return null
   } catch (e) {
+    return friendly((e as Error).message)
+  }
+}
+
+const photoHint = (m: string) =>
+  /base64_image/i.test(m) ? 'Photos need a database update. Run supabase-source-images.sql in Supabase.' : null
+
+// Photos aren't loaded with the map (they're large); each one is fetched when its source is opened.
+export async function loadSourceImage(id: string): Promise<string | null> {
+  if (id.startsWith('temp-')) return null
+  const { data, error } = await supabase().from('water_sources').select('base64_image').eq('id', id).maybeSingle()
+  if (error) return null // column not added yet, or no access: just show no photo
+  return (data as { base64_image: string | null } | null)?.base64_image ?? null
+}
+
+// Add, replace (data URL) or remove (null) a source's photo. Returns an error message, or null.
+export async function setSourceImage(id: string, base64Image: string | null): Promise<string | null> {
+  try {
+    const { data, error } = await supabase().from('water_sources').update({ base64_image: base64Image }).eq('id', id).select('id')
+    if (error) return photoHint(error.message) ?? friendly(error.message)
+    if (!data || data.length === 0) return "You're not allowed to change this source."
+    return null
+  } catch (e) {
+    return friendly((e as Error).message)
+  }
+}
+
+// Lock or unlock a source for moving. Shows the change right away, then saves it.
+export async function setLocked(id: string, locked: boolean): Promise<string | null> {
+  const before = state.assets
+  set({ ...state, assets: state.assets.map((a) => (a.id === id ? { ...a, locked } : a)) })
+  try {
+    const { data, error } = await supabase().from('water_sources').update({ locked }).eq('id', id).select('id')
+    if (error || !data || data.length === 0) {
+      set({ ...state, assets: before })
+      if (error && /locked/i.test(error.message) && /column/i.test(error.message))
+        return 'Locking needs a database update. Run supabase-source-locked.sql in Supabase.'
+      return error ? friendly(error.message) : "You're not allowed to change this source."
+    }
+    return null
+  } catch (e) {
+    set({ ...state, assets: before })
     return friendly((e as Error).message)
   }
 }

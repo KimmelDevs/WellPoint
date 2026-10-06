@@ -1,20 +1,20 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Lock, LockOpen } from 'lucide-react'
 import type { RefObject } from 'react'
 import type { Map as MapLibreMap } from 'maplibre-gl'
-import { Droplet, Droplets, GlassWater, Waves } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-import { Link } from '@tanstack/react-router'
 import { useBarangays } from '@/lib/barangays'
 import { MapMarker, MarkerContent, MarkerPopup, MarkerTooltip, useMap } from '@/components/ui/map'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   CAN_PLACE, CAN_SET_STATUS, KINDS, REPORT_TYPES, STATUSES,
-  moveAsset, removeAsset, setStatus, useWaterStore,
+  loadSourceImage, moveAsset, removeAsset, setLocked, setSourceImage, setStatus, useWaterStore,
 } from '@/lib/water-store'
-import type { Asset, AssetKind, Role, Status } from '@/lib/water-store'
+import { photoToBase64 } from '@/lib/image'
+import { SOURCE_ICONS, SOURCE_TONE } from '@/components/sourceIcons'
+import type { Asset, Role, Status } from '@/lib/water-store'
 
-const ICONS: Record<AssetKind, LucideIcon> = { pump: Droplet, well: Droplets, reservoir: Waves, station: GlassWater }
+const ICONS = SOURCE_ICONS
 const field = 'w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm'
 
 // Hands the MapLibre instance to the page so a drop can be turned into coordinates.
@@ -55,14 +55,14 @@ export function AssetMarkers() {
         // Any status other than "Working" colours the pin; otherwise each kind has its own colour.
         const tone =
           STATUSES[a.status].marker ||
-          (a.kind === 'reservoir' ? 'bg-deep' : a.kind === 'station' ? 'bg-aqua' : a.kind === 'well' ? 'bg-teal-600' : 'bg-well')
+          SOURCE_TONE[a.kind]
         return (
           // The key changes with edit rights so MapLibre rebuilds the marker with the right draggable setting.
           <MapMarker
-            key={`${a.id}-${canEdit}`}
+            key={`${a.id}-${canEdit}-${a.locked !== false}`}
             longitude={a.lng}
             latitude={a.lat}
-            draggable={canEdit}
+            draggable={canEdit && a.locked === false}
             onDragEnd={(ll) => moveAsset(a.id, ll.lng, ll.lat)}
           >
             <MarkerContent>
@@ -102,6 +102,8 @@ function AssetPopup({ asset, role, canEdit }: { asset: Asset; role: Role; canEdi
         </p>
       </div>
 
+      <SourcePhoto id={asset.id} name={asset.name} canEdit={canEdit} />
+
       {CAN_SET_STATUS[role].includes(asset.kind) && (
         <div className="space-y-1">
           <label htmlFor={`status-${asset.id}`} className="block font-semibold">
@@ -136,12 +138,107 @@ function AssetPopup({ asset, role, canEdit }: { asset: Asset; role: Role; canEdi
         </div>
       )}
 
+      {canEdit && <LockControl asset={asset} />}
+    </div>
+  )
+}
+
+// The source's photo, fetched when the popup opens. Editors can add, replace or remove it.
+function SourcePhoto({ id, name, canEdit }: { id: string; name: string; canEdit: boolean }) {
+  const [image, setImage] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const input = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    let alive = true
+    loadSourceImage(id).then((img) => {
+      if (!alive) return
+      setImage(img)
+      setLoading(false)
+    })
+    return () => {
+      alive = false
+    }
+  }, [id])
+
+  const change = async (next: string | null) => {
+    setBusy(true)
+    setError('')
+    const err = await setSourceImage(id, next)
+    if (err) setError(err)
+    else setImage(next)
+    setBusy(false)
+  }
+
+  if (loading) return <div className="h-24 animate-pulse rounded-lg bg-mist" aria-label="Loading photo" />
+  if (!image && !canEdit) return null
+
+  return (
+    <div className="space-y-1.5">
+      {image && <img src={image} alt={`Photo of ${name}`} className="max-h-40 w-full rounded-lg object-cover" />}
       {canEdit && (
-        <div className="space-y-2">
-          <p className="text-ink/70">Drag the marker to move it.</p>
-          <Button size="sm" variant="outline" onClick={() => removeAsset(asset.id)}>Remove</Button>
+        <div className="flex flex-wrap gap-2">
+          <input
+            ref={input}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0]
+              e.target.value = '' // allow picking the same file again
+              if (!file) return
+              try {
+                await change(await photoToBase64(file))
+              } catch (err) {
+                setError((err as Error).message)
+              }
+            }}
+          />
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => input.current?.click()}>
+            {busy ? 'Saving…' : image ? 'Change photo' : 'Add photo'}
+          </Button>
+          {image && (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void change(null)}>
+              Remove photo
+            </Button>
+          )}
         </div>
       )}
+      {error && <p role="alert" className="text-xs text-orange-700">{error}</p>}
+    </div>
+  )
+}
+
+// Locked (default): the marker stays put. Unlock to drag it, then lock it again.
+function LockControl({ asset }: { asset: Asset }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const locked = asset.locked !== false
+
+  const toggle = async () => {
+    setBusy(true)
+    setError('')
+    const err = await setLocked(asset.id, !locked)
+    if (err) setError(err)
+    setBusy(false)
+  }
+
+  return (
+    <div className="space-y-2 border-t border-line pt-3">
+      <p className="flex items-center gap-1.5 text-ink/70">
+        {locked ? <Lock className="size-4" aria-hidden="true" /> : <LockOpen className="size-4 text-well" aria-hidden="true" />}
+        {locked ? 'Locked in place.' : 'Unlocked: drag the marker to move it, then lock it.'}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant={locked ? 'outline' : 'default'} disabled={busy} onClick={() => void toggle()}>
+          {locked ? 'Unlock to move' : 'Lock'}
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => removeAsset(asset.id)}>Remove</Button>
+      </div>
+      {error && <p role="alert" className="text-xs text-orange-700">{error}</p>}
     </div>
   )
 }

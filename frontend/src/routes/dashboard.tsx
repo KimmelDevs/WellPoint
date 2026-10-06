@@ -3,7 +3,7 @@ import { Link, Outlet, createFileRoute, redirect } from '@tanstack/react-router'
 import type { LucideIcon } from 'lucide-react'
 import {
   BarChart3, BellRing, LogOut, MapIcon,
-  Megaphone, PanelLeftClose, PanelLeftOpen, Plus, SlidersHorizontal, Truck, Users as UsersIcon,
+  Megaphone, PanelLeftClose, PanelLeftOpen, Plus, SlidersHorizontal, Truck, UserRound, Users as UsersIcon,
 } from 'lucide-react'
 import { Logo } from '../components/Logo'
 import { ProfileButton } from '../components/ProfileButton'
@@ -42,6 +42,7 @@ const nav: NavItem[] = [
 ]
 
 const bottom: NavItem[] = [
+  { to: '/dashboard/profile', label: 'Profile', icon: UserRound }, // every role
   { to: '/dashboard/settings', label: 'Demo controls', icon: SlidersHorizontal, roles: ['lgu', 'drrm'] },
   { to: '/login', label: 'Log out', icon: LogOut, logout: true },
 ]
@@ -57,11 +58,11 @@ function NavItem({ item, open }: { item: NavItem; open: boolean }) {
       onClick={item.logout ? () => void logout() : undefined}
       className={cn(
         'flex items-center gap-3 whitespace-nowrap transition',
-        open
-          ? 'rounded-xl px-3 py-2.5 text-sm font-semibold text-white/80 hover:bg-white/10'
-          : 'size-11 shrink-0 justify-center rounded-full text-ink/60 hover:bg-mist',
+        open ? 'rounded-xl px-3 py-2.5 text-sm font-semibold' : 'size-11 shrink-0 justify-center rounded-full',
       )}
-      activeProps={{ className: open ? 'bg-white text-ink hover:bg-white' : 'bg-well text-white hover:bg-well' }}
+      // Active and inactive each set their own colours, so the text never ends up white-on-white.
+      inactiveProps={{ className: open ? 'text-white/80 hover:bg-white/10' : 'text-ink/60 hover:bg-mist' }}
+      activeProps={{ className: open ? 'bg-white/20 text-white ring-1 ring-white/30 hover:bg-white/25' : 'bg-well text-white hover:bg-well' }}
     >
       <Icon className="size-[18px] shrink-0" aria-hidden="true" />
       {open && item.label}

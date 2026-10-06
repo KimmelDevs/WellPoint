@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import type { ExpressionSpecification } from 'maplibre-gl'
@@ -8,6 +8,10 @@ import { Input } from '@/components/ui/input'
 import { SummaryPanel } from '@/components/SummaryPanel'
 import { cn } from '@/lib/utils'
 import { AssetMarkers } from '@/components/WaterAssets'
+import { AddSourcePanel, PendingMarker, PlaceClick } from '@/components/AddSourceOnMap'
+import { CAN_PLACE } from '@/lib/water-store'
+import type { AssetKind } from '@/lib/water-store'
+import type { Point } from '@/components/AddSourceOnMap'
 import { useWaterStore } from '@/lib/water-store'
 import { barangayDetail, useDomain } from '@/lib/store'
 import type { AccessState, VulnerabilityTier } from '@/data/types'
@@ -71,6 +75,15 @@ function BarangayMap() {
   const [hoverId, setHoverId] = useState<string | null>(null)
   const [focus, setFocus] = useState<Focus | null>(null)
   const [summaryOpen, setSummaryOpen] = useState(false)
+
+  // Adding a source from the map (LGU and DRRM): tap +, then tap the spot.
+  const canAddOnMap = role === 'lgu' || role === 'drrm'
+  const [placing, setPlacing] = useState(false)
+  const [newPoint, setNewPoint] = useState<Point | null>(null)
+  const [newKind, setNewKind] = useState<AssetKind>('well')
+  const kindForNew = CAN_PLACE[role].includes(newKind) ? newKind : (CAN_PLACE[role][0] ?? 'well')
+  const adding = useRef(false) // read by the barangay click handler, so picking a spot doesn't open a barangay
+  adding.current = placing || newPoint !== null
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -171,9 +184,19 @@ function BarangayMap() {
               'line-width': ['case', isSelected, 3, 1] as ExpressionSpecification,
             }}
             onHover={(e) => setHoverId(e?.feature.properties.ADM4_PCODE ?? null)}
-            onClick={(e) => pick(e.feature.properties.ADM4_PCODE)}
+            onClick={(e) => {
+              if (!adding.current) pick(e.feature.properties.ADM4_PCODE)
+            }}
           />
           <AssetMarkers />
+          <PlaceClick
+            active={placing}
+            onPick={(p) => {
+              setPlacing(false)
+              setNewPoint(p)
+            }}
+          />
+          {newPoint && <PendingMarker point={newPoint} kind={kindForNew} onMove={setNewPoint} />}
         </Map>
       )}
 
@@ -226,6 +249,17 @@ function BarangayMap() {
 
         {role === 'lgu' && (
           <Fab onClick={() => setSummaryOpen(true)}>Summary</Fab>
+        )}
+        {canAddOnMap && !placing && !newPoint && (
+          <button
+            type="button"
+            onClick={() => setPlacing(true)}
+            aria-label="Add a water source"
+            title="Add a water source"
+            className="grid size-12 place-items-center rounded-full bg-well text-3xl font-light leading-none text-white shadow-lg hover:bg-deep"
+          >
+            +
+          </button>
         )}
         {role === 'official' && (
           <Link to="/dashboard/add-source" className="rounded-full bg-well px-4 py-2 text-sm font-bold text-white shadow-md hover:bg-deep">
@@ -305,6 +339,28 @@ function BarangayMap() {
       </div>
 
       {/* LGU summary overlay */}
+      {placing && (
+        <div className="absolute left-1/2 top-16 z-10 flex -translate-x-1/2 items-center gap-3 rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white shadow-lg">
+          Tap the map where the water source is
+          <button type="button" onClick={() => setPlacing(false)} className="rounded-full bg-white/15 px-2 py-0.5 text-xs hover:bg-white/25">
+            Cancel
+          </button>
+        </div>
+      )}
+      {newPoint && (
+        <AddSourcePanel
+          point={newPoint}
+          kind={kindForNew}
+          onKindChange={setNewKind}
+          onDone={() => setNewPoint(null)}
+          onCancel={() => setNewPoint(null)}
+          onRepick={() => {
+            setNewPoint(null)
+            setPlacing(true)
+          }}
+        />
+      )}
+
       {summaryOpen && (
         <div className="absolute inset-0 z-20 flex flex-col bg-white/95 backdrop-blur-sm">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">

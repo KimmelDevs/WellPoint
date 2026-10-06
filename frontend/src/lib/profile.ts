@@ -7,7 +7,8 @@ import { logout, reloadProfile } from './auth'
 
 export type Profile = {
   fullName: string
-  barangay: string
+  barangay: string // barangay name, for display
+  barangayPsgc: string // PSA code — what's actually saved (profiles.barangay_psgc)
   phone: string
   purok: string
   householdSize: string // kept as text for the number input; '' = not given
@@ -16,13 +17,17 @@ export type Profile = {
 }
 
 const EMPTY: Profile = {
-  fullName: '', barangay: '', phone: '', purok: '',
+  fullName: '', barangay: '', barangayPsgc: '', phone: '', purok: '',
   householdSize: '', hasVulnerable: false, position: '',
 }
 
+type BgyRef = { name: string | null } | { name: string | null }[] | null
+const bgyName = (b: BgyRef) => (Array.isArray(b) ? b[0]?.name : b?.name) ?? ''
+
 type Row = {
   name: string | null
-  barangay: string | null
+  barangay_psgc: string | null
+  barangays: BgyRef
   phone: string | null
   purok: string | null
   household_size: number | null
@@ -77,19 +82,23 @@ export function loadProfileDetails(): Promise<void> {
       if (!id) return
       const { data, error } = await supabase()
         .from('profiles')
-        .select('name, barangay, phone, purok, household_size, has_vulnerable, position')
+        .select('name, barangay_psgc, barangays(name), phone, purok, household_size, has_vulnerable, position')
         .eq('id', id)
         .maybeSingle()
       if (error) {
         // Probably supabase-profile-details.sql hasn't been run yet: show the sign-up basics.
         console.warn('Could not load profile details:', error.message)
-        const basic = await supabase().from('profiles').select('name, barangay').eq('id', id).maybeSingle()
-        if (basic.data) current = { ...EMPTY, fullName: basic.data.name ?? '', barangay: basic.data.barangay ?? '' }
+        const basic = await supabase().from('profiles').select('name, barangay_psgc, barangays(name)').eq('id', id).maybeSingle()
+        if (basic.data) {
+          const b = basic.data as { name: string | null; barangay_psgc: string | null; barangays: BgyRef }
+          current = { ...EMPTY, fullName: b.name ?? '', barangay: bgyName(b.barangays), barangayPsgc: b.barangay_psgc ?? '' }
+        }
       } else if (data) {
         const r = data as Row
         current = {
           fullName: r.name ?? '',
-          barangay: r.barangay ?? '',
+          barangay: bgyName(r.barangays),
+          barangayPsgc: r.barangay_psgc ?? '',
           phone: r.phone ?? '',
           purok: r.purok ?? '',
           householdSize: r.household_size ? String(r.household_size) : '',
@@ -140,7 +149,7 @@ export function validateProfile(p: Profile, household: boolean): Partial<Record<
   const errors: Partial<Record<keyof Profile, string>> = {}
   if (!p.fullName.trim()) errors.fullName = 'Enter your full name.'
   else if (p.fullName.trim().length > 100) errors.fullName = 'Keep your name under 100 characters.'
-  if (!p.barangay.trim()) errors.barangay = 'Select your barangay.'
+  if (!p.barangayPsgc.trim()) errors.barangay = 'Select your barangay.'
   const phone = cleanPhone(p.phone)
   if (phone && !PHONE.test(phone)) errors.phone = 'Use a mobile number like 09171234567.'
   if (household && p.householdSize) {
@@ -168,10 +177,11 @@ export async function saveProfile(p: Profile, canChangeBarangay: boolean): Promi
     purok: p.purok.trim(),
     position: p.position.trim(),
     barangay: canChangeBarangay ? p.barangay : current.barangay,
+    barangayPsgc: canChangeBarangay ? p.barangayPsgc : current.barangayPsgc,
   }
   await writeProfile({
     name: next.fullName.slice(0, 100),
-    ...(canChangeBarangay ? { barangay: next.barangay } : {}),
+    ...(canChangeBarangay ? { barangay_psgc: next.barangayPsgc || null } : {}),
     phone: next.phone.slice(0, 20),
     purok: next.purok.slice(0, 120),
     household_size: next.householdSize ? Number(next.householdSize) : null,

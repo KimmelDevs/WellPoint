@@ -21,6 +21,8 @@ export interface Asset {
   status: SourceStatus
   barangayPsgc: string
   systemId: string
+  /** Locked sources can't be dragged on the map. Missing = locked (the safe default). */
+  locked?: boolean
 }
 
 /** A pilot water system (Level I / II / III) serving a barangay. Seeded in Supabase. */
