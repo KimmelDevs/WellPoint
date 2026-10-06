@@ -32,7 +32,7 @@ function Page() {
   const saved = useProfile()
   const loaded = useProfileLoaded()
   const { role } = useWaterStore()
-  const { names } = useBarangays()
+  const { barangays } = useBarangays()
   const email = typeof window === 'undefined' ? '' : (getUser()?.email ?? '')
   const household = role === 'citizen'
 
@@ -139,15 +139,25 @@ function Page() {
                     hint={household ? undefined : 'Your barangay decides which reports you see. Ask the LGU to change it.'}
                   >
                     <select
-                      value={form.barangay}
-                      onChange={(e) => set('barangay', e.target.value)}
+                      value={form.barangayPsgc}
+                      onChange={(e) => {
+                        const code = e.target.value
+                        const name = barangays.find((b) => b.psgcCode === code)?.name ?? ''
+                        setForm((f) => ({ ...f, barangayPsgc: code, barangay: name }))
+                        setDirty(true)
+                        setDone('')
+                      }}
                       disabled={!household}
                       aria-invalid={!!errors.barangay}
                       className={cn('h-9 w-full rounded-md border border-line bg-white px-3 text-sm', !household && 'bg-mist text-ink/70')}
                     >
                       <option value="">Select your barangay</option>
-                      {form.barangay && !names.includes(form.barangay) && <option value={form.barangay}>{form.barangay}</option>}
-                      {names.map((n) => <option key={n} value={n}>{n}</option>)}
+                      {form.barangayPsgc && !barangays.some((b) => b.psgcCode === form.barangayPsgc) && (
+                        <option value={form.barangayPsgc}>{form.barangay || form.barangayPsgc}</option>
+                      )}
+                      {[...barangays]
+                        .sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }))
+                        .map((b) => <option key={b.psgcCode} value={b.psgcCode}>{b.name}</option>)}
                     </select>
                   </Field>
                   <Field label="Email" hint="The email you log in with.">
