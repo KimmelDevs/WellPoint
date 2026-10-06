@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
 import { useBarangays } from '@/lib/barangays'
-import { ROLES, setUserRole, useWaterStore } from '@/lib/water-store'
+import { ROLES, loadUsers, setUserRole, useWaterStore } from '@/lib/water-store'
 import type { Role } from '@/lib/water-store'
 
 export const Route = createFileRoute('/dashboard/users')({ component: Page })
@@ -65,6 +65,19 @@ function Row({ id, name, email, role, barangayPsgc }: { id: string; name: string
 
 function Page() {
   const { role, users } = useWaterStore()
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+
+  // Load the user list when an LGU opens the page (it was never loaded before).
+  useEffect(() => {
+    if (role !== 'lgu') return
+    setLoading(true)
+    loadUsers().then((err) => {
+      setLoadError(err ?? '')
+      setLoading(false)
+    })
+  }, [role])
+
   if (role !== 'lgu') {
     return (
       <div>
@@ -81,7 +94,21 @@ function Page() {
         Assign roles and barangays so every user is bounded by the right permissions.
       </p>
 
-      {users.length === 0 ? (
+      {loadError && (
+        <p role="alert" className="mt-5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+          Couldn't load users: {loadError}
+        </p>
+      )}
+
+      {loading ? (
+        <p className="mt-5 text-sm text-ink/60">Loading users…</p>
+      ) : users.length <= 1 && !loadError ? (
+        <p className="mt-5 rounded-xl border border-dashed border-line p-6 text-sm text-ink/70">
+          {users.length === 0
+            ? 'No user accounts found.'
+            : 'Only your own account is visible. Run supabase-users-roles.sql in Supabase so the LGU can see every user, then refresh.'}
+        </p>
+      ) : users.length === 0 ? (
         <p className="mt-5 rounded-xl border border-dashed border-line p-6 text-sm text-ink/70">
           No user accounts yet. Accounts appear here once someone signs up.
         </p>

@@ -3,7 +3,7 @@ import { Link, Outlet, createFileRoute, redirect } from '@tanstack/react-router'
 import type { LucideIcon } from 'lucide-react'
 import {
   BarChart3, BellRing, LogOut, MapIcon,
-  Megaphone, PanelLeftClose, PanelLeftOpen, Plus, SlidersHorizontal, Truck, Users as UsersIcon, UserRound,
+  Megaphone, PanelLeftClose, PanelLeftOpen, Plus, SlidersHorizontal, Truck, Users as UsersIcon,
 } from 'lucide-react'
 import { Logo } from '../components/Logo'
 import { ProfileButton } from '../components/ProfileButton'
@@ -37,12 +37,11 @@ const nav: NavItem[] = [
   { to: '/dashboard/reports', label: 'Reports', icon: BarChart3, roles: ['citizen', 'official'] },
   { to: '/dashboard/add-source', label: 'Add source', icon: Plus, roles: ['official'] },
   { to: '/dashboard/warnings', label: 'Warnings', icon: Megaphone, roles: ['lgu', 'drrm'] },
-  { to: '/dashboard/deliveries', label: 'Deliveries', icon: Truck, roles: ['drrm'] },
+  { to: '/dashboard/deliveries', label: 'Deliveries', icon: Truck }, // residents request, DRRM/LGU schedule, officials follow
   { to: '/dashboard/users', label: 'Users', icon: UsersIcon, roles: ['lgu'] },
 ]
 
 const bottom: NavItem[] = [
-  { to: '/dashboard/profile', label: 'Profile', icon: UserRound },
   { to: '/dashboard/settings', label: 'Demo controls', icon: SlidersHorizontal, roles: ['lgu', 'drrm'] },
   { to: '/login', label: 'Log out', icon: LogOut, logout: true },
 ]
@@ -72,10 +71,7 @@ function NavItem({ item, open }: { item: NavItem; open: boolean }) {
 
 // Who is signed in: full card when the sidebar is open, an initial bubble when closed.
 function UserBadge({ user, open }: { user: User; open: boolean }) {
-  const profile = useProfile() // updates right after the Profile page saves
-  const name = profile.fullName || user.name
-  const barangay = profile.barangay || user.barangay
-  const label = `${name} · ${barangay ? `Brgy. ${barangay}` : 'No barangay'} · ${ROLE_LABELS[user.role]}`
+  const label = `${user.name} · ${user.barangay ? `Brgy. ${user.barangay}` : 'No barangay'} · ${ROLE_LABELS[user.role]}`
   if (!open) {
     return (
       <span
@@ -83,14 +79,14 @@ function UserBadge({ user, open }: { user: User; open: boolean }) {
         aria-label={label}
         className="grid size-11 place-items-center rounded-full bg-sky text-sm font-extrabold uppercase text-well"
       >
-        {name.trim().charAt(0) || '?'}
+        {user.name.trim().charAt(0) || '?'}
       </span>
     )
   }
   return (
     <div className="mb-2 rounded-xl bg-white/10 px-3 py-2.5 text-sm">
-      <p className="truncate font-semibold">{name}</p>
-      <p className="truncate text-xs text-white/60">{barangay ? `Brgy. ${barangay}` : 'No barangay'}</p>
+      <p className="truncate font-semibold">{user.name}</p>
+      <p className="truncate text-xs text-white/60">{user.barangay ? `Brgy. ${user.barangay}` : 'No barangay'}</p>
       <span className="mt-1 inline-block rounded-full bg-white/15 px-2 py-0.5 text-xs font-semibold">
         {ROLE_LABELS[user.role]}
       </span>

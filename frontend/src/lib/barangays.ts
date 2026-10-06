@@ -64,54 +64,38 @@ function centroid(g: Geom): { lat: number; lng: number } {
   return { lat: wy / totalArea, lng: wx / totalArea }
 }
 
-// The boundary file is downloaded once and shared by every component that uses this hook.
-// Each record carries the PSGC code, area and centroid alongside its geometry.
-let cache: Promise<Feat[]> | null = null
-function loadFeatures(): Promise<Feat[]> {
-  cache ??= fetch(DATA_URL)
-    .then((r) => (r.ok ? (r.json() as Promise<Raw>) : Promise.reject(new Error(String(r.status)))))
-    .then((raw) =>
-      raw.features
-        .filter((f) => f.properties.ADM3_PCODE === CITY_PCODE)
-        .map((f) => {
-          const c = centroid(f.geometry)
-          return {
-            name: f.properties.ADM4_EN,
-            psgcCode: f.properties.psgc_code,
-            areaSqKm: f.properties.AREA_SQKM,
-            lat: c.lat,
-            lng: c.lng,
-            geometry: f.geometry,
-          }
-        }),
-    )
-    .catch((e) => {
-      cache = null // allow a retry on the next mount
-      throw e
-    })
-  return cache
-}
-
-// `names` is every barangay A-Z; `barangays` are the full records (PSGC code, area, centroid);
-// `barangayAt` / `barangayOf` find the one a point falls inside.
+// Loads the barangay boundaries once and exposes names, the full records (with
+// PSGC code, area, and centroid), and point-in-polygon lookup.
 export function useBarangays() {
   const [feats, setFeats] = useState<Feat[]>([])
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
-    let alive = true
-    loadFeatures()
-      .then((f) => {
-        if (!alive) return
-        setFeats(f)
+    const ctrl = new AbortController()
+    fetch(DATA_URL, { signal: ctrl.signal })
+      .then((r) => (r.ok ? (r.json() as Promise<Raw>) : Promise.reject(new Error(String(r.status)))))
+      .then((raw) => {
+        setFeats(
+          raw.features
+            .filter((f) => f.properties.ADM3_PCODE === CITY_PCODE)
+            .map((f) => {
+              const c = centroid(f.geometry)
+              return {
+                name: f.properties.ADM4_EN,
+                psgcCode: f.properties.psgc_code,
+                areaSqKm: f.properties.AREA_SQKM,
+                lat: c.lat,
+                lng: c.lng,
+                geometry: f.geometry,
+              }
+            }),
+        )
         setLoaded(true)
       })
-      .catch(() => {
-        if (alive) setLoaded(true) // without the file the lists still work, just without barangay names
+      .catch((e: Error) => {
+        if (e.name !== 'AbortError') setLoaded(true) // without the file the lists still work, just without barangay names
       })
-    return () => {
-      alive = false
-    }
+    return () => ctrl.abort()
   }, [])
 
   const barangays = useMemo<GeoBarangay[]>(

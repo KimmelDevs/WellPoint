@@ -348,13 +348,23 @@ export async function loadWarnings() {
   }
 }
 
-export async function loadUsers() {
+// Loads every profile the database lets this person read (LGU: everyone, after
+// supabase-users-roles.sql). Returns an error message, or null when it worked.
+export async function loadUsers(): Promise<string | null> {
+  type Row = { id: string; name: string | null; email: string | null; role: string | null; barangay_psgc?: string | null }
   try {
-    const { data, error } = await supabase().from('profiles').select('id, name, email, role, barangay_psgc').order('name')
-    if (error) throw new Error(error.message)
+    let res: { data: unknown[] | null; error: { message: string } | null } = await supabase()
+      .from('profiles')
+      .select('id, name, email, role, barangay_psgc')
+      .order('name')
+    // Older databases have no barangay_psgc column: still list the users, just without it.
+    if (res.error && /barangay_psgc/i.test(res.error.message)) {
+      res = await supabase().from('profiles').select('id, name, email, role').order('name')
+    }
+    if (res.error) return friendly(res.error.message)
     set({
       ...state,
-      users: (data as { id: string; name: string | null; email: string | null; role: string | null; barangay_psgc: string | null }[]).map((r) => ({
+      users: ((res.data ?? []) as Row[]).map((r) => ({
         id: r.id,
         name: r.name ?? '',
         email: r.email ?? '',
@@ -362,8 +372,9 @@ export async function loadUsers() {
         barangayPsgc: r.barangay_psgc ?? '',
       })),
     })
-  } catch {
-    /* profiles table not applied yet */
+    return null
+  } catch (e) {
+    return friendly((e as Error).message)
   }
 }
 
@@ -555,11 +566,20 @@ export async function setWarningStatus(id: string, status: WarningStatus): Promi
 }
 
 // LGU role management
+// LGU only. Goes through the set_user_role database function (supabase-users-roles.sql), which
+// checks the caller is LGU — the profiles table itself never lets anyone change a role directly.
 export async function setUserRole(userId: string, role: Role, barangayPsgc: string): Promise<string | null> {
   try {
-    const { data, error } = (await supabase().from('profiles').update({ role, barangay_psgc: barangayPsgc || null }).eq('id', userId).select('id')) as Result
-    if (error) return friendly(error.message)
-    if (!data || data.length === 0) return 'permission denied'
+    const { error } = await supabase().rpc('set_user_role', {
+      target: userId,
+      new_role: role,
+      new_barangay_psgc: barangayPsgc,
+    })
+    if (error) {
+      if (/function .*set_user_role|could not find the function/i.test(error.message))
+        return 'Run supabase-users-roles.sql in Supabase first.'
+      return error.message // already readable, e.g. "Only the LGU can change roles."
+    }
     void loadUsers()
     return null
   } catch (e) {
